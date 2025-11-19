@@ -44,12 +44,6 @@ def _print_title(title, width=SEPARATOR_WIDTH, sep_char='='):
     print(sep_char * width)
 
 
-def _print_matrix(label, matrix):
-    """Print a label and a 2x2 matrix in the established style."""
-    print(label)
-    print_2x2_matrix(matrix)
-
-
 def is_key_valid(key, N=26):
     """Validate a 2x2 key matrix.
 
@@ -195,7 +189,7 @@ def validate_input_string(s):
     if not isinstance(s, str):
         return None
     
-    if not (MIN_STRING_LENGTH <= len(s) and len(s) <= MAX_STRING_LENGTH):
+    if (len(s) < MIN_STRING_LENGTH or MAX_STRING_LENGTH < len(s)):
         return None
     
     cleaned = ''.join(ch.lower() for ch in s if ch.isalpha())
@@ -389,12 +383,6 @@ def iterative_attack(plaintext, initial_cipher, first_encryption_key, second_enc
     # Remove padding marker to get the actual text to encrypt
     initial_cipher_no_marking = initial_cipher[:slice_for_odd_length] if initial_cipher.endswith(PAD_CHAR) else initial_cipher
     cipher_after_iterative_attack = initial_cipher_no_marking
-    initial_cipher_no_marking = initial_cipher[:slice_for_odd_length] if initial_cipher.endswith(PAD_CHAR) else initial_cipher
-    cipher_after_iterative_attack = initial_cipher_no_marking
-    
-    while (True):
-        # Keep the previous cipher so it can be used later to print the correlation between the letters
-        prev_cipher = cipher_after_iterative_attack
         
     while (True):
         # Keep the previous cipher so it can be used later to print the correlation between the letters
@@ -409,16 +397,10 @@ def iterative_attack(plaintext, initial_cipher, first_encryption_key, second_enc
         if (initial_cipher_no_marking == cipher_after_iterative_attack):
             _print_mapping(prev_cipher, initial_cipher_no_marking)
             break
-        
-        # Found the plaintext from the cipher        
-        if (initial_cipher_no_marking == cipher_after_iterative_attack):
-            _print_mapping(prev_cipher, initial_cipher_no_marking)
-            break
     
     _print_separator()
     _print_label_value("\nPlaintext:", plaintext)
-    _print_label_value("\nPlaintext:", plaintext)
-    _print_label_value("Initial cipher", initial_cipher)
+    _print_label_value("Initial cipher:", initial_cipher)
     print("First encryption key:")
     print_2x2_matrix(first_encryption_key)
     print("Second encryption key:")
@@ -427,8 +409,7 @@ def iterative_attack(plaintext, initial_cipher, first_encryption_key, second_enc
     _print_label_value("Iterations:", iterative_attack_iterations) 
     print()
     _print_separator()
-    print()
-    _print_separator()
+
     
 def print_2x2_matrix(matrix):
     """Print a 2x2 matrix in formatted style with validation.
@@ -465,7 +446,6 @@ def main():
     b = 24
 
 
-
     # Encryption keys
     first_encryption_key = [[17, 14], [0, 3]]
     second_encryption_key = [[5, 14], [14, 17]]
@@ -485,7 +465,8 @@ def main():
         
         # Validate input
         if (plaintext == None):
-            print("Please insert a string with only letters from the English alphabet... [a-z] [A-Z]\n")
+            print("\nPlease insert a string with only letters from the English alphabet... [a-z] [A-Z]\n"
+                  "The string has to be between 4 to 10 letters")
             continue # Skip to the next iteration so another input is get inserted instead of the current one
         
         # Finish runtime due to user input
@@ -503,30 +484,7 @@ def main():
         print("Second encryption key:")
         print_2x2_matrix(second_encryption_key)
         _print_label_value("Ciphertext:", cipher)
-    while (True):
-        plaintext = input("\nInsert plaintext, alphabetic characters only\nexit or quit to exit\n")
-        plaintext = validate_input_string(plaintext) # Returns a lower case string without any letters that are non-alphabetic letters
-        
-        # Validate input
-        if (plaintext == None):
-            print("Please insert a string with only letters from the English alphabet... [a-z] [A-Z]\n")
-            continue # Skip to the next iteration so another input is get inserted instead of the current one
-        
-        # Finish runtime due to user input
-        if (plaintext.lower() in EXIT_COMMANDS):
-            print("Finishing Execution...")
-            break
-    
-        # Encryption
-        cipher = NameCipher_encryption(plaintext, first_encryption_key, second_encryption_key, a, b, N)
-        
-        _print_title("ENCRYPTION")
-        _print_label_value("\nPlaintext:", plaintext)
-        print("First encryption key:")
-        print_2x2_matrix(first_encryption_key)
-        print("Second encryption key:")
-        print_2x2_matrix(second_encryption_key)
-        _print_label_value("Ciphertext:", cipher)
+        print()
 
         # Decryption
         decrypted = NameCipher_decryption(cipher, decryption_key, second_decryption_key, a, b, N)
@@ -539,23 +497,7 @@ def main():
         print_2x2_matrix(second_decryption_key)
         _print_label_value("Decrypted:", decrypted)
         _print_label_value("Match:", "YES" if decrypted == plaintext else "NO")
-        
-         # 2nd exercise: Iterative Attack
-        _print_title("ITERATIVE ATTACK")
-        iterative_attack(plaintext, cipher, first_encryption_key, second_encryption_key, a, b, N)
         print()
-        
-        # Decryption
-        decrypted = NameCipher_decryption(cipher, decryption_key, second_decryption_key, a, b, N)
-        
-        _print_title("DECRYPTION")
-        _print_label_value("\nCiphertext:", cipher)
-        print("First decryption key:")
-        print_2x2_matrix(decryption_key)
-        print("Second decryption key:")
-        print_2x2_matrix(second_decryption_key)
-        _print_label_value("Decrypted:", decrypted)
-        _print_label_value("Match:", "YES" if decrypted == plaintext else "NO")
         
          # 2nd exercise: Iterative Attack
         _print_title("ITERATIVE ATTACK")
