@@ -1,18 +1,19 @@
 # RC6 works on a single 16 byte block at a time
+import common.constants as const
 
 '''global paremeters'''
-ROUNDS = 20  # number of rounds
+ROUNDS = const.ROUNDS_DEFAULT  # number of rounds
 
 
 # force every operation into 32 bit math (mod 2^32)
 def u32(x: int) -> int:
-    return x & 0xFFFFFFFF
+    return x & const.WORD_MASK
 
 #circular rotation of a 32 bit word
 def rotl32(x, s):
     s = s & 31
-    x = x & 0xFFFFFFFF
-    return (x << s) | (x >> (32 - s))  & 0xFFFFFFFF
+    x = x & const.WORD_MASK
+    return (x << s) | (x >> (32 - s))  & const.WORD_MASK
 
 def main():
     # --- Test suit --- #
@@ -75,7 +76,7 @@ def bytes_to_words_little_endian(data: bytes) -> list[int]:
 user_key: bytes - the key to expand
 round: int - number of rounds
 returns (or how we want to represent): list[int] - the expanded key as a list of 32 bit words"""
-def expand_key(user_key: bytes, round: int = ROUNDS) -> list[int]:
+def expand_key(user_key: bytes, rounds: int = const.ROUNDS_DEFAULT) -> list[int]:
     #basic parameters
     w = 32  # word size in bits (4 bytes which equals 32 bits)
     r = round # predefined number of rounds (defined globally)
@@ -85,8 +86,8 @@ def expand_key(user_key: bytes, round: int = ROUNDS) -> list[int]:
         c += 1  # account for partial word
 
     # constants for key schedule
-    P32 = 0xB7E15163 # euler's constant
-    Q32 = 0x9E3779B9# golden ratio
+    P32 = const.P32 # euler's constant
+    Q32 = const.Q32 # golden ratio
 
     # produces L[0..c-1] where each entry is a 32 bit word
     L = bytes_to_words_little_endian(user_key)
@@ -112,7 +113,7 @@ def expand_key(user_key: bytes, round: int = ROUNDS) -> list[int]:
 
 # RC6 encryption of a single 16 byte block
 # steps: unpack, pre whitening, rounds, post whitening, pack back
-def encrypt_block(block16: bytes, S: list[int], rounds: int = 20) -> bytes
+def encrypt_block(block16: bytes, S: list[int], rounds: int = const.ROUNDS_DEFAULT) -> bytes:
     #unpack block into four 32 bit words
     A, B, C, D = unpack_block_little_endian(block16)
     #pre whitening
@@ -134,6 +135,29 @@ def encrypt_block(block16: bytes, S: list[int], rounds: int = 20) -> bytes
     A = u32(A + S[2 * rounds + 2])
     C = u32(C + S[2 * rounds + 3])
 
+    #return packed block
+    return pack_block_little_endian(A, B, C, D)
+
+def decrypt_block(block16: bytes, S: list[int], rounds: int = const.ROUNDS_DEFAULT) -> bytes:
+    #unpack block into four 32 bit words
+    A, B, C, D = unpack_block_little_endian(block16)
+    #post whitening
+    C = u32(C - S[2 * rounds + 3])
+    A = u32(A - S[2 * rounds + 2])
+
+    #main rounds (reverse order, literally)
+    for i in range(rounds, 0, -1):
+        A, B, C, D = D, A, B, C
+        t = rotl32(u32(B * (2 * B + 1)), 5)
+        u = rotl32(u32(D * (2 * D + 1)), 5)
+        C = u32(rotl32(u32(C - S[2 * i + 1]), t) ^ u)
+        A = u32(rotl32(u32(A - S[2 * i]), u) ^ t)
+
+    # undo pre whitening
+    B = u32(B - S[0])
+    D = u32(D - S[1])
+
+    #return packed block
     return pack_block_little_endian(A, B, C, D)
 
 if __name__ == "__main__":
