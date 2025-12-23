@@ -1,6 +1,11 @@
-
-from src.utils.utils import ec_scalar_mult, ec_point_add
 import os
+import sys
+from pathlib import Path
+
+# Add parent directories to Python path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from utils.utils import ec_scalar_mult, ec_point_add, ec_point_double, ec_mod_inverse
 
 # --- Constants (secp256k1) ---
 P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
@@ -49,7 +54,7 @@ def decode_point_as_plaintext(point):
 def generate_keys():
     """Generate ElGamal key pair (private_key, public_key)."""
     private_key = 1 + os.urandom(31)[0]  # Use os.urandom instead of secrets.randbelow
-    public_key = ec_scalar_mult(private_key, G, A, P)
+    public_key = ec_scalar_mult(private_key, G, P)
     return private_key, public_key
 
 def encrypt(public_key, message_text):
@@ -57,9 +62,9 @@ def encrypt(public_key, message_text):
     M = encode_plaintext_as_point(message_text)
     k = 1 + os.urandom(31)[0]
     
-    C1 = ec_scalar_mult(k, G, A, P)
-    S = ec_scalar_mult(k, public_key, A, P)
-    C2 = ec_point_add(M, S, A, P)
+    C1 = ec_scalar_mult(k, G, P)
+    S = ec_scalar_mult(k, public_key, P)
+    C2 = ec_point_add(M, S, P)
 
     return (C1, C2)
 
@@ -67,27 +72,39 @@ def decrypt(private_key, ciphertext):
     """Decrypt ElGamal ciphertext. Returns original message bytes."""
     C1, C2 = ciphertext
     
-    S = ec_scalar_mult(private_key, C1, A, P)
+    S = ec_scalar_mult(private_key, C1, P)
     neg_S = (S[0], (P - S[1]) % P)
-    M = ec_point_add(C2, neg_S, A, P)
+    M = ec_point_add(C2, neg_S, P)
     
     return decode_point_as_plaintext(M)
 #El gamal Example
 
 def main():
-    # Key Generation
+    # --- 1. Key Generation ---
+    print("\n--- Key Generation ---")
     private_key, public_key = generate_keys()
-    print("Private Key:", private_key)
-    print("Public Key:", public_key)
+    
+    print(f"Private Key: {hex(private_key)}")
+    print(f"Public Key:  {public_key}")
 
-    # Message to encrypt
+    # --- 2. Encryption ---
+    print("\n--- Encryption ---")
     message = "Hello, ElGamal!"
-    print("Original Message:", message)
+    print(f"Original Message: {message}")
 
-    # Encryption
     ciphertext = encrypt(public_key, message)
-    print("Ciphertext (C1, C2):", ciphertext)
+    
+    C1, C2 = ciphertext
+    print(f"Ciphertext C1: {C1}")
+    print(f"Ciphertext C2: {C2}")
 
-    # Decryption
+    # --- 3. Decryption ---
+    print("\n--- Decryption ---")
     decrypted_message = decrypt(private_key, ciphertext)
-    print("Decrypted Message:", decrypted_message.decode('utf-8'))
+    
+    print(f"Decrypted Message: {decrypted_message.decode('utf-8')}")
+
+if __name__ == "__main__":
+    main()
+
+
