@@ -1,5 +1,13 @@
 # RC6 works on a single 16 byte block at a time
-from common import constants as const
+import sys
+import os
+
+try:
+    from core import constants as const
+except ImportError:
+    # Fallback for project imports
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    from src.core import constants as const
 
 
 '''global paremeters'''

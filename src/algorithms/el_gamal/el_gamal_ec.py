@@ -1,110 +1,304 @@
+"""
+El-Gamal Elliptic Curve Key Encapsulation (KEM).
+
+El-Gamal on elliptic curves provides public-key encryption.
+This implementation uses SECP256K1 curve for key wrapping.
+
+The algorithm works as follows:
+1. Server publishes public key point (an EC point)
+2. Client generates ephemeral key pair
+3. Client computes shared secret using Diffie-Hellman
+4. Client encrypts session key with shared secret
+5. Server decrypts using their private key
+
+References:
+    - Handbook of Elliptic and Hyperelliptic Curve Cryptography
+    - SEC 2: Recommended Elliptic Curve Domain Parameters
+"""
+
 import os
 import sys
 from pathlib import Path
 
-# Add parent directories to Python path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Add project root to path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-from utils.utils import ec_scalar_mult, ec_point_add, ec_point_double, ec_mod_inverse
+try:
+    from src.utils.utils import ec_scalar_mult, ec_point_add
+except ImportError:
+    from utils.utils import ec_scalar_mult, ec_point_add
 
-# --- Constants (secp256k1) ---
+# SECP256K1 Parameters
 P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
-A = 0
-B = 7
+N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798,
      0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8)
-N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+
 
 def ensure_32_bytes(data: bytes) -> bytes:
-    """Ensure the byte array is exactly 32 bytes, padding with leading zeros if necessary."""
+    """
+    Ensure byte array is exactly 32 bytes.
+    
+    Pads with leading zeros if needed, or truncates if too long.
+    
+    Args:
+        data: Input bytes to normalize
+        
+    Returns:
+        32-byte array
+    """
     if len(data) < 32:
         return b'\x00' * (32 - len(data)) + data
     elif len(data) > 32:
         return data[:32]
     return data
 
-def encode_plaintext_as_point(plaintext):
-    """Map plaintext bytes to elliptic curve point using Koblitz padding."""
-    if isinstance(plaintext, str):
-        plaintext = plaintext.encode('utf-8')
-        
-    if len(plaintext) > 31:
-        plaintext = plaintext[:31]
+
+class ElGamalEC:
+    """
+    El-Gamal Elliptic Curve public-key encryption.
     
-    m_int = int.from_bytes(plaintext, byteorder='big')
-    K = 256
-    x_base = m_int * K
+    This class provides key encapsulation for wrapping session keys.
+    Each instance represents one side of the key exchange.
     
-    for i in range(K):
-        x = (x_base + i) % P
-        y_square = (pow(x, 3, P) + (A * x) + B) % P
-        y = pow(y_square, (P + 1) // 4, P)
+    Attributes:
+        private_key: Secret scalar (for decryption)
+        public_key: Public EC point (for encryption)
+    """
+    
+    def __init__(self, private_key: int = None):
+        """
+        Initialize El-Gamal with a private key.
         
-        if (y * y) % P == y_square:
-            return (x, y)
+        Args:
+            private_key: Secret scalar value. If None, generates random.
             
-    raise ValueError("Failed to map message to point")
-
-def decode_point_as_plaintext(point):
-    """Extract plaintext bytes from elliptic curve point."""
-    x, _ = point
-    m_int = x // 256
-    return m_int.to_bytes((m_int.bit_length() + 7) // 8, byteorder='big')
-
-def generate_keys():
-    """Generate ElGamal key pair (private_key, public_key)."""
-    private_key = 1 + os.urandom(31)[0]  # Use os.urandom instead of secrets.randbelow
-    public_key = ec_scalar_mult(private_key, G, P)
-    return private_key, public_key
-
-def encrypt(public_key, message_text):
-    """Encrypt message using ElGamal encryption. Returns (C1, C2)."""
-    M = encode_plaintext_as_point(message_text)
-    k = 1 + os.urandom(31)[0]
+        Raises:
+            ValueError: If private_key is outside valid range (1, N)
+        """
+        if private_key is None:
+            # Generate random private key
+            self.private_key = int.from_bytes(os.urandom(32), 'big') % (N - 1) + 1
+        else:
+            if not (1 <= private_key < N):
+                raise ValueError(f"Private key must be in range [1, {N})")
+            self.private_key = private_key
+        
+        # Compute public key: P = d * G
+        self.public_key = ec_scalar_mult(self.private_key, G, P)
+        
+        if self.public_key is None:
+            raise ValueError("Failed to compute public key")
     
-    C1 = ec_scalar_mult(k, G, P)
-    S = ec_scalar_mult(k, public_key, P)
-    C2 = ec_point_add(M, S, P)
-
-    return (C1, C2)
-
-def decrypt(private_key, ciphertext):
-    """Decrypt ElGamal ciphertext. Returns original message bytes."""
-    C1, C2 = ciphertext
+    @staticmethod
+    def from_public_key(public_key: tuple) -> 'ElGamalEC':
+        """
+        Create El-Gamal instance from public key only.
+        
+        Useful when you only need to encrypt (no private key available).
+        
+        Args:
+            public_key: Tuple of (x, y) coordinates of public key point
+            
+        Returns:
+            ElGamalEC instance with public_key set, private_key=None
+        """
+        instance = object.__new__(ElGamalEC)
+        instance.private_key = None
+        instance.public_key = public_key
+        return instance
     
-    S = ec_scalar_mult(private_key, C1, P)
-    neg_S = (S[0], (P - S[1]) % P)
-    M = ec_point_add(C2, neg_S, P)
+    def get_public_key(self) -> tuple:
+        """
+        Get the public key as EC point coordinates.
+        
+        Returns:
+            Tuple of (x, y) coordinates
+        """
+        return self.public_key
     
-    return decode_point_as_plaintext(M)
-#El gamal Example
+    def encrypt(self, session_key: bytes) -> tuple:
+        """
+        Encrypt a session key using El-Gamal.
+        
+        This creates a key encapsulation: outputs ciphertext that contains
+        the encrypted session key. The ciphertext is a pair of EC points.
+        
+        Args:
+            session_key: 256-bit (32-byte) symmetric key to encrypt
+            
+        Returns:
+            Tuple of (C1, C2) where:
+                C1 = r * G (ephemeral public key)
+                C2 = session_key XOR (r * public_key)
+        
+        Raises:
+            ValueError: If session_key is not 32 bytes
+            
+        Process:
+            1. Generate ephemeral random scalar r
+            2. Compute C1 = r * G (ephemeral public point)
+            3. Compute shared secret = r * recipient_public_key
+            4. Derive symmetric key from shared secret
+            5. XOR session_key with derived key for C2
+            6. Return (C1, C2) as encrypted bundle
+        """
+        if len(session_key) != 32:
+            raise ValueError(f"Session key must be 32 bytes, got {len(session_key)}")
+        
+        # Generate ephemeral key
+        r = int.from_bytes(os.urandom(32), 'big') % (N - 1) + 1
+        
+        # C1 = r * G (ephemeral public point)
+        C1 = ec_scalar_mult(r, G, P)
+        if C1 is None:
+            raise ValueError("Failed to compute ephemeral public point")
+        
+        # Compute shared secret: r * recipient_public_key
+        shared_secret = ec_scalar_mult(r, self.public_key, P)
+        if shared_secret is None:
+            raise ValueError("Failed to compute shared secret")
+        
+        # Derive symmetric key from shared secret x-coordinate
+        # Use SHA-256 for KDF
+        import hashlib
+        x_coord = shared_secret[0].to_bytes(32, 'big')
+        derived_key = hashlib.sha256(x_coord).digest()
+        
+        # C2 = session_key XOR derived_key
+        C2 = bytes(a ^ b for a, b in zip(session_key, derived_key))
+        
+        # Return C1 as point (x, y) and C2 as bytes
+        return (C1, C2)
+    
+    def decrypt(self, C1: tuple, C2: bytes) -> bytes:
+        """
+        Decrypt a session key using El-Gamal.
+        
+        Args:
+            C1: Ephemeral public point (x, y) from encryption
+            C2: Encrypted symmetric key bytes
+            
+        Returns:
+            Decrypted session key (32 bytes)
+            
+        Raises:
+            ValueError: If private_key is not available or decryption fails
+            
+        Process:
+            1. Check that private key is available
+            2. Compute shared secret = private_key * C1
+            3. Derive symmetric key from shared secret
+            4. XOR C2 with derived key to recover session_key
+        """
+        if self.private_key is None:
+            raise ValueError("Cannot decrypt without private key")
+        
+        if len(C2) != 32:
+            raise ValueError(f"Encrypted key must be 32 bytes, got {len(C2)}")
+        
+        # Compute shared secret: private_key * C1
+        shared_secret = ec_scalar_mult(self.private_key, C1, P)
+        if shared_secret is None:
+            raise ValueError("Failed to compute shared secret during decryption")
+        
+        # Derive symmetric key using same method as encryption
+        import hashlib
+        x_coord = shared_secret[0].to_bytes(32, 'big')
+        derived_key = hashlib.sha256(x_coord).digest()
+        
+        # Recover session_key: C2 XOR derived_key
+        session_key = bytes(a ^ b for a, b in zip(C2, derived_key))
+        
+        return session_key
+    
+    @staticmethod
+    def point_to_bytes(point: tuple) -> bytes:
+        """
+        Serialize EC point to bytes (compressed format).
+        
+        Args:
+            point: Tuple of (x, y) coordinates
+            
+        Returns:
+            33-byte compressed point format
+        """
+        x, y = point
+        x_bytes = x.to_bytes(32, 'big')
+        # First byte indicates if y is even (0x02) or odd (0x03)
+        prefix = b'\x02' if y % 2 == 0 else b'\x03'
+        return prefix + x_bytes
+    
+    @staticmethod
+    def bytes_to_point(data: bytes) -> tuple:
+        """
+        Deserialize bytes to EC point.
+        
+        Args:
+            data: 33-byte compressed point format
+            
+        Returns:
+            Tuple of (x, y) coordinates
+            
+        Raises:
+            ValueError: If point is not on the curve
+        """
+        if len(data) != 33:
+            raise ValueError(f"Compressed point must be 33 bytes, got {len(data)}")
+        
+        prefix = data[0]
+        x = int.from_bytes(data[1:], 'big')
+        
+        # Recover y from x using curve equation: y^2 = x^3 + 7
+        y_squared = (pow(x, 3, P) + 7) % P
+        y = pow(y_squared, (P + 1) // 4, P)
+        
+        # Check if we got the right y (the one that matches prefix)
+        if (y % 2 == 0) != (prefix == 0x02):
+            y = P - y
+        
+        # Verify point is on curve
+        if (y * y) % P != y_squared:
+            raise ValueError("Point is not on the curve")
+        
+        return (x, y)
+
 
 def main():
-    # --- 1. Key Generation ---
-    print("\n--- Key Generation ---")
-    private_key, public_key = generate_keys()
+    """Test El-Gamal EC implementation."""
+    print("Testing El-Gamal EC...")
     
-    print(f"Private Key: {hex(private_key)}")
-    print(f"Public Key:  {public_key}")
-
-    # --- 2. Encryption ---
-    print("\n--- Encryption ---")
-    message = "Hello, ElGamal!"
-    print(f"Original Message: {message}")
-
-    ciphertext = encrypt(public_key, message)
+    # Create two parties: sender and recipient
+    print("\n1. Key generation...")
+    recipient = ElGamalEC()
+    print(f"✓ Recipient key pair generated")
+    print(f"  Public key x: {recipient.public_key[0]:064x}")
     
-    C1, C2 = ciphertext
-    print(f"Ciphertext C1: {C1}")
-    print(f"Ciphertext C2: {C2}")
-
-    # --- 3. Decryption ---
-    print("\n--- Decryption ---")
-    decrypted_message = decrypt(private_key, ciphertext)
+    # Sender only has recipient's public key
+    sender = ElGamalEC.from_public_key(recipient.get_public_key())
+    print(f"✓ Sender obtained recipient's public key")
     
-    print(f"Decrypted Message: {decrypted_message.decode('utf-8')}")
+    # Sender encrypts a session key
+    print("\n2. Session key encryption...")
+    session_key = os.urandom(32)
+    C1, C2 = sender.encrypt(session_key)
+    print(f"✓ Session key encrypted")
+    print(f"  Original key: {session_key.hex()[:32]}...")
+    print(f"  Ciphertext C1 x: {C1[0]:064x}")
+    print(f"  Ciphertext C2: {C2.hex()[:32]}...")
+    
+    # Recipient decrypts
+    print("\n3. Session key decryption...")
+    decrypted_key = recipient.decrypt(C1, C2)
+    assert decrypted_key == session_key, "Decryption failed!"
+    print(f"✓ Session key decrypted successfully")
+    print(f"  Decrypted key: {decrypted_key.hex()[:32]}...")
+    
+    print("\n✓ All tests passed!")
+
 
 if __name__ == "__main__":
     main()
-
 

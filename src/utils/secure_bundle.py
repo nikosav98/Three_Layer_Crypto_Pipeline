@@ -20,6 +20,25 @@ class SecureBundle:
     def get_t(self): return self.__t
     def get_sender_pub_key(self): return self.__sender_pub_key
     def get_sender_id(self): return self.__sender_id
+    
+    # Property shortcuts for easier access
+    @property
+    def encrypted_key(self): return self.__ek
+    
+    @property
+    def iv(self): return self.__iv
+    
+    @property
+    def ciphertext(self): return self.__c
+    
+    @property
+    def auth_tag(self): return self.__t
+    
+    @property
+    def sender_public_key(self): return self.__sender_pub_key
+    
+    @property
+    def sender_id(self): return self.__sender_id
 
     def serialize(self) -> str:
         """
