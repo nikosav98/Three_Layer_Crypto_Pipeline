@@ -34,6 +34,7 @@ import json
 import base64
 import os
 import sys
+from typing import Optional, Tuple
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,7 +44,7 @@ if project_root not in sys.path:
 from src.utils.key_pair import KeyPair
 from src.utils.email_message import EmailMessage
 from src.algorithms.key_exchange.exchange_manager import ExchangeManager
-
+from cryptography.hazmat.primitives import serialization
 
 class SecureClient:
     """
@@ -65,7 +66,7 @@ class SecureClient:
     """
     
     def __init__(self, host: str = "127.0.0.1", port: int = 5000, 
-                 server_public_key_coords: tuple = None) -> None:
+                 server_public_key_coords: Optional[Tuple[int, int]] = None) -> None:
         """
         Initialize secure client.
         
@@ -80,11 +81,32 @@ class SecureClient:
         """
         self.host = host
         self.port = port
+        self.socket: Optional[socket.socket] = None
         
         # Generate client's key pair
         print("[Client] Generating key pair...")
+        
+        # 1. Generate the keys
         self.client_private_key, self.client_public_key = KeyPair.generate()
-        print("✓ Key pair generated")
+
+        # 2. Serialize Private Key to PEM format
+        private_pem = self.client_private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption()
+        ).decode('utf-8')
+
+        # 3. Serialize Public Key to PEM format
+        public_pem = self.client_public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode('utf-8')
+
+        # 4. Print the keys correctly
+        print("Key pair generated:")
+        print(f"Client private key:\n{private_pem}")
+        print(f"Client public key:\n{public_pem}")
+        
         
         # Store server's public key (needed for encryption)
         self.server_public_key = server_public_key_coords
@@ -104,10 +126,10 @@ class SecureClient:
             print(f"\n[Client] Connecting to server {self.host}:{self.port}...")
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.connect((self.host, self.port))
-            print("✓ Connected to server")
+            print("Connected to server")
             return True
         except socket.error as e:
-            print(f"✗ Connection failed: {e}")
+            print(f"Connection failed: {e}")
             return False
     
     def exchange_keys(self) -> bool:
@@ -124,19 +146,28 @@ class SecureClient:
         try:
             # Receive server's public key
             print("\n[Client] Receiving server's public key...")
+            assert self.socket is not None, "Socket is not connected"
             data = self.socket.recv(4096).decode('utf-8')
             
             # Parse server's public key
             server_msg = json.loads(data)
             if server_msg.get('type') != 'KEY_EXCHANGE':
-                print("✗ Expected KEY_EXCHANGE message")
+                print("Expected KEY_EXCHANGE message")
                 return False
             
             self.server_public_key = (
                 server_msg['public_key']['x'],
                 server_msg['public_key']['y']
             )
-            print("✓ Server's public key received")
+            
+            public_pem = KeyPair.from_coordinates(self.server_public_key)
+
+            public_pem = public_pem.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode('utf-8')
+            
+            print(f"Server's public key received:\n{public_pem}")
             
             # Send client's public key
             print("[Client] Sending client's public key...")
@@ -150,12 +181,24 @@ class SecureClient:
                 }
             }
             
+            #
+            public_key_tuple = (client_pub_x, client_pub_y)
+            client_public_key = KeyPair.from_coordinates(public_key_tuple)
+            
+            client_public_key = client_public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode('utf-8')
+            
+            print(f"[Client] Public key sent:\n{client_public_key}")
+            
+            assert self.socket is not None, "Socket is not connected"
             self.socket.send(json.dumps(key_msg).encode('utf-8'))
-            print("✓ Client's public key sent")
+            print("Client's public key sent")
             
             return True
         except Exception as e:
-            print(f"✗ Key exchange failed: {e}")
+            print(f"Key exchange failed: {e}")
             return False
     
     def send_secure_message(self, message_content: str) -> bool:
@@ -178,19 +221,35 @@ class SecureClient:
             Exception: If encryption fails
         """
         try:
-            print(f"\n[Client] Encrypting message...")
+            print(f"\n[Client] ENCRYPTION PIPELINE STARTING")
+            print(f"{'='*70}")
             
             # Create email message
+            print(f"\n[STEP 0] Preparing message")
             mail = EmailMessage(message_content)
+            mail_bytes = mail.to_bytes()
+            print(f"Input message: {message_content}")
+            print(f"Message bytes length: {len(mail_bytes)}")
+            print(f"Message hex: {mail_bytes.hex()[:64]}...")
             
             # Create manager and encrypt
+            print(f"\n[STEP 1-3] THREE-LAYER ENCRYPTION PIPELINE")
+            print(f" 1. Schnorr Signature Generation")
+            print(f" 2. RC6-GCM Encryption")
+            print(f" 3. Session Key Wrapping")
+            
+            if self.server_public_key is None:
+                raise ValueError("Server public key not received. Please exchange keys first.")
+            
             manager = ExchangeManager(self.client_private_key, self.server_public_key)
             bundle = manager.secure_send(mail)
             
-            print("✓ Message encrypted successfully")
-            print(f"  - Ciphertext: {len(bundle.ciphertext)} bytes")
-            print(f"  - Auth tag: {len(bundle.auth_tag)} bytes")
-            print(f"  - IV: {len(bundle.iv)} bytes")
+            print(f"\nMessage encrypted successfully")
+            print(f"{'='*70}")
+            print(f"Ciphertext: {len(bundle.ciphertext)} bytes | {bundle.ciphertext.hex()[:64]}...")
+            print(f"Session Key: {len(bundle.encrypted_key)} bytes | {bundle.encrypted_key.hex()[:32]}...")
+            print(f"Auth Tag: {len(bundle.auth_tag)} bytes | {bundle.auth_tag.hex()}")
+            print(f"IV: {len(bundle.iv)} bytes | {bundle.iv.hex()}")
             
             # Serialize bundle to JSON
             sender_pub_x, sender_pub_y = KeyPair.get_coordinates(bundle.sender_public_key)
@@ -208,12 +267,13 @@ class SecureClient:
             
             # Send encrypted message
             print("[Client] Sending encrypted message to server...")
+            assert self.socket is not None, "Socket is not connected"
             self.socket.send(json.dumps(message_json).encode('utf-8'))
-            print("✓ Message sent")
+            print("Message sent")
             
             return True
         except Exception as e:
-            print(f"✗ Encryption/send failed: {e}")
+            print(f"Encryption/send failed: {e}")
             return False
     
     def receive_response(self) -> str:
@@ -225,6 +285,7 @@ class SecureClient:
         """
         try:
             print("\n[Client] Waiting for server response...")
+            assert self.socket is not None, "Socket is not connected"
             response_data = self.socket.recv(4096).decode('utf-8')
             
             if not response_data:
@@ -234,18 +295,18 @@ class SecureClient:
             response = json.loads(response_data)
             
             if response.get('type') == 'ACK':
-                print("✓ Server acknowledged message")
+                print("Server acknowledged message")
                 content = response.get('message', 'Message received')
                 print(f"  - Response: {content}")
                 return content
             elif response.get('type') == 'ERROR':
-                print(f"✗ Server error: {response.get('message')}")
+                print(f"Server error: {response.get('message')}")
                 return ""
             else:
-                print(f"? Unknown response type: {response.get('type')}")
+                print(f"Unknown response type: {response.get('type')}")
                 return ""
         except Exception as e:
-            print(f"✗ Response receive failed: {e}")
+            print(f"Response receive failed: {e}")
             return ""
     
     def close(self) -> None:
@@ -261,7 +322,7 @@ class SecureClient:
                 self.socket.close()
                 print("\n[Client] Disconnected")
         except Exception as e:
-            print(f"✗ Disconnect failed: {e}")
+            print(f"Disconnect failed: {e}")
     
     def run_interactive(self) -> None:
         """
@@ -276,7 +337,7 @@ class SecureClient:
         4. Close connection
         """
         print("\n" + "="*70)
-        print("SECURE CLIENT - Message Encryption Pipeline Demo")
+        print("SECURE CLIENT - Message Encryption Pipeline")
         print("="*70)
         
         # Connect
@@ -314,7 +375,7 @@ class SecureClient:
                 print("\n\n[Client] Interrupted by user")
                 break
             except Exception as e:
-                print(f"✗ Error: {e}")
+                print(f"Error: {e}")
                 continue
         
         # Cleanup

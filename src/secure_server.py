@@ -42,6 +42,7 @@ import sys
 import threading
 import time
 from typing import Optional, Tuple
+from cryptography.hazmat.primitives import serialization
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -95,7 +96,23 @@ class SecureServer:
         # Generate server's key pair
         print("[Server] Generating key pair...")
         self.server_private_key, self.server_public_key = KeyPair.generate()
-        print("✓ Key pair generated")
+        
+        # Serialize keys so they can be printed
+        private_pem = self.server_private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption()
+        ).decode('utf-8')
+
+        # Serialize Public Key
+        public_pem = self.server_public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode('utf-8')
+        
+        print("Key pair generated"
+              f"\nServer private key:\n{private_pem}"
+              f"\nServer public key:\n{public_pem}")
         
         self.server_socket = None
         self.running = False
@@ -123,13 +140,16 @@ class SecureServer:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             
+            # Add server timeout to allow keyboard interrupt to be read
+            self.server_socket.settimeout(1.0) # Check every second
+            
             # Bind and listen
-            print(f"\n[Server] Binding to {self.host}:{self.port}...")
+            print(f"\n[Server] Binding to {self.host}:{self.port}")
             self.server_socket.bind((self.host, self.port))
             self.server_socket.listen(self.max_clients)
             self.running = True
-            print(f"✓ Server listening on {self.host}:{self.port}")
-            print(f"✓ Max clients: {self.max_clients}")
+            print(f"Server listening on {self.host}:{self.port}")
+            print("Ctrl+C to shutdown server")
             print("-"*70)
             
             # Accept connections
@@ -141,7 +161,7 @@ class SecureServer:
                     # Check max clients
                     with self.client_lock:
                         if self.client_count >= self.max_clients:
-                            print(f"\n✗ Max clients reached, rejecting {client_addr}")
+                            print(f"\nMax clients reached, rejecting {client_addr}")
                             client_socket.close()
                             continue
                         
@@ -162,16 +182,18 @@ class SecureServer:
                     
                     handler_thread = threading.Thread(target=handler.handle, daemon=True)
                     handler_thread.start()
-                    
+                
+                except socket.timeout:
+                    continue
                 except socket.error as e:
                     if self.running:
-                        print(f"✗ Socket error: {e}")
+                        print(f"Socket error: {e}")
                 except Exception as e:
                     if self.running:
-                        print(f"✗ Error accepting connection: {e}")
+                        print(f"Error accepting connection: {e}")
         
         except socket.error as e:
-            print(f"✗ Server socket error: {e}")
+            print(f"Server socket error: {e}")
         except KeyboardInterrupt:
             print("\n[Server] Interrupt received")
         finally:
@@ -191,11 +213,11 @@ class SecureServer:
         if self.server_socket:
             try:
                 self.server_socket.close()
-                print("✓ Server socket closed")
+                print("Server socket closed")
             except:
                 pass
         
-        print("✓ Server stopped")
+        print("Server stopped")
     
     def client_disconnected(self) -> None:
         """
@@ -278,7 +300,7 @@ class ClientHandler:
                     break
         
         except Exception as e:
-            print(f"✗ [Client #{self.client_id}] Error: {e}")
+            print(f"[Client #{self.client_id}] Error: {e}")
         finally:
             self._cleanup()
     
@@ -307,30 +329,30 @@ class ClientHandler:
             }
             
             self.client_socket.send(json.dumps(key_msg).encode('utf-8'))
-            print(f"✓ [Client #{self.client_id}] Server's public key sent")
+            print(f"[Client #{self.client_id}] Server's public key sent")
             
             # Receive client's public key
             print(f"[Client #{self.client_id}] Waiting for client's public key...")
             data = self.client_socket.recv(4096).decode('utf-8')
             
             if not data:
-                print(f"✗ [Client #{self.client_id}] No data received")
+                print(f"[Client #{self.client_id}] No data received")
                 return False
             
             client_msg = json.loads(data)
             if client_msg.get('type') != 'KEY_EXCHANGE':
-                print(f"✗ [Client #{self.client_id}] Expected KEY_EXCHANGE")
+                print(f"[Client #{self.client_id}] Expected KEY_EXCHANGE")
                 return False
             
             self.client_public_key = (
                 client_msg['public_key']['x'],
                 client_msg['public_key']['y']
             )
-            print(f"✓ [Client #{self.client_id}] Client's public key received")
+            print(f"[Client #{self.client_id}] Client's public key received")
             
             return True
         except Exception as e:
-            print(f"✗ [Client #{self.client_id}] Key exchange failed: {e}")
+            print(f"[Client #{self.client_id}] Key exchange failed: {e}")
             return False
     
     def _handle_message(self) -> bool:
@@ -372,16 +394,16 @@ class ClientHandler:
                 return self._decrypt_and_respond(msg)
             
             # Unknown message type
-            print(f"✗ [Client #{self.client_id}] Unknown message type: {msg_type}")
+            print(f"[Client #{self.client_id}] Unknown message type: {msg_type}")
             self._send_error("Unknown message type")
             return False
         
         except json.JSONDecodeError:
-            print(f"✗ [Client #{self.client_id}] Invalid JSON received")
+            print(f"[Client #{self.client_id}] Invalid JSON received")
             self._send_error("Invalid JSON")
             return True
         except Exception as e:
-            print(f"✗ [Client #{self.client_id}] Error handling message: {e}")
+            print(f"[Client #{self.client_id}] Error handling message: {e}")
             self._send_error(str(e))
             return True
     
@@ -404,7 +426,9 @@ class ClientHandler:
             True if handled, False on error
         """
         try:
-            print(f"[Client #{self.client_id}] Decrypting message...")
+            print(f"\n[Client #{self.client_id}] DECRYPTION PIPELINE STARTING")
+            print(f"{'='*70}")
+            print(f"[Client #{self.client_id}] Extracting message components...")
             
             # Reconstruct SecureBundle from JSON
             from src.utils.secure_bundle import SecureBundle
@@ -413,24 +437,36 @@ class ClientHandler:
             
             # Decode encrypted_key from base64
             encrypted_key_bytes = base64.b64decode(msg['encrypted_key'])
+            print(f"[Client #{self.client_id}]\tSession Key: {len(encrypted_key_bytes)} bytes | {encrypted_key_bytes.hex()[:32]}...")
             
             # Reconstruct sender's public key from (x, y) coordinates
             x = msg['sender_public_key']['x']
             y = msg['sender_public_key']['y']
+            print(f"[Client #{self.client_id}]\tSender Public Key: x={str(x)[:32]}... y={str(y)[:32]}...")
             public_numbers = ec.EllipticCurvePublicNumbers(x, y, ec.SECP256K1())
             sender_public_key = public_numbers.public_key(default_backend())
+            
+            # Decode ciphertext and auth tag
+            iv_bytes = base64.b64decode(msg['iv'])
+            ciphertext_bytes = base64.b64decode(msg['ciphertext'])
+            auth_tag_bytes = base64.b64decode(msg['auth_tag'])
+            print(f"[Client #{self.client_id}]\tIV: {len(iv_bytes)} bytes | {iv_bytes.hex()}")
+            print(f"[Client #{self.client_id}]\tCiphertext: {len(ciphertext_bytes)} bytes | {ciphertext_bytes.hex()[:64]}...")
+            print(f"[Client #{self.client_id}]\tAuth Tag: {len(auth_tag_bytes)} bytes | {auth_tag_bytes.hex()}")
             
             # Create SecureBundle with decoded data
             bundle = SecureBundle(
                 ek=encrypted_key_bytes,
-                iv=base64.b64decode(msg['iv']),
-                c=base64.b64decode(msg['ciphertext']),
-                t=base64.b64decode(msg['auth_tag']),
+                iv=iv_bytes,
+                c=ciphertext_bytes,
+                t=auth_tag_bytes,
                 sender_pub_key=sender_public_key,
                 sender_id="client"
             )
             
             # Decrypt using ExchangeManager
+            print(f"\n[Client #{self.client_id}] Starting THREE-LAYER DECRYPTION")
+            print('-' * 70)
             manager = ExchangeManager(
                 self.server_private_key,
                 bundle.sender_public_key
@@ -438,8 +474,9 @@ class ClientHandler:
             
             plaintext = manager.secure_receive(bundle, self.server_private_key)
             
-            print(f"✓ [Client #{self.client_id}] Message decrypted successfully")
-            print(f"  - Message: {plaintext}")
+            print(f"{'='*70}")
+            print(f"[Client #{self.client_id}] Message decrypted successfully")
+            print(f"Final message: {plaintext}")
             
             # Send ACK
             ack_msg = {
@@ -447,16 +484,16 @@ class ClientHandler:
                 'message': 'Message received and verified'
             }
             self.client_socket.send(json.dumps(ack_msg).encode('utf-8'))
-            print(f"✓ [Client #{self.client_id}] ACK sent")
+            print(f"[Client #{self.client_id}] ACK sent")
             
             return True
         
         except ValueError as e:
-            print(f"✗ [Client #{self.client_id}] Decryption/verification failed: {e}")
+            print(f"[Client #{self.client_id}] Decryption/verification failed: {e}")
             self._send_error(f"Decryption failed: {str(e)}")
             return True
         except Exception as e:
-            print(f"✗ [Client #{self.client_id}] Error decrypting: {e}")
+            print(f"[Client #{self.client_id}] Error decrypting: {e}")
             self._send_error(str(e))
             return True
     
@@ -512,7 +549,7 @@ def main():
     
     # Print header
     print("\n" + "="*70)
-    print("SECURE SERVER - Message Decryption Pipeline Demo")
+    print("SECURE SERVER - Message Decryption Pipeline")
     print("="*70)
     
     # Create and run server

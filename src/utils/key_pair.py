@@ -54,3 +54,27 @@ class KeyPair:
             )
         except Exception as e:
             raise ValueError(f"Failed to extract coordinates from public key: {e}")
+        
+    @staticmethod
+    def from_coordinates(coordinates : tuple):
+        """
+        Reconstruct an EC public key object from its x and y coordinates.
+        
+        Args:
+            x (int): The x-coordinate of the public key point.
+            y (int): The y-coordinate of the public key point.
+            
+        Returns:
+            ec.EllipticCurvePublicKey: The reconstructed public key object.
+        """
+        try:
+            # 1. Create PublicNumbers object using the specific curve (SECP256K1)
+            public_numbers = ec.EllipticCurvePublicNumbers(
+                x=coordinates[0],
+                y=coordinates[1],
+                curve=ec.SECP256K1()
+            )
+            # 2. Convert numbers back into a usable key object
+            return public_numbers.public_key()
+        except Exception as e:
+            raise ValueError(f"Failed to reconstruct public key from coordinates: {e}")

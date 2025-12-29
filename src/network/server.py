@@ -301,13 +301,3 @@ class SecureServer:
         """Get number of connected clients."""
         with self.lock:
             return len(self.clients)
-
-
-if __name__ == "__main__":
-    # Example usage
-    server = SecureServer(host='0.0.0.0', port=5000)
-    try:
-        server.start()
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-        server.stop()

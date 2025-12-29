@@ -17,18 +17,21 @@ References:
 
 import os
 import sys
+from typing import Optional, Union, Tuple
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from typing import Optional
 from src.utils.email_message import EmailMessage
 from src.utils.secure_bundle import SecureBundle
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from src.algorithms.schnorr.schnorr_signature import SchnorrSigner
 from src.algorithms.rc6.rc6_gcm_mode import RC6GCM
+from src.algorithms.el_gamal.el_gamal_ec import ElGamalEC
 
 
 class ExchangeManager:
@@ -63,23 +66,23 @@ class ExchangeManager:
     
     def __init__(self,
                  sender_private_key: ec.EllipticCurvePrivateKey, 
-                 recipient_public_key: ec.EllipticCurvePublicKey) -> None:
+                 recipient_public_key: Union[ec.EllipticCurvePublicKey, Tuple[int, int]]) -> None:
         """
         Initialize ExchangeManager with key material.
         
         Args:
             sender_private_key: EC private key (for signing messages)
-            recipient_public_key: EC public key (for wrapping session key)
+            recipient_public_key: EC public key or (x, y) tuple (for wrapping session key)
             
         Raises:
-            TypeError: If keys are not proper EC key objects
+            TypeError: If keys are not proper EC key objects or tuples
         """
         self.sender_private_key = sender_private_key
         self.recipient_public_key = recipient_public_key
         
         # Ephemeral values generated during secure_send
-        self.session_key: bytes = None
-        self.iv: bytes = None
+        self.session_key: Optional[bytes] = None
+        self.iv: Optional[bytes] = None
     
     def generate_session_key(self) -> bytes:
         """
@@ -103,6 +106,22 @@ class ExchangeManager:
             12-byte random initialization vector
         """
         return os.urandom(12)
+    
+    def _get_recipient_coords(self) -> tuple:
+        """
+        Extract (x, y) coordinates from recipient's public key.
+        
+        Handles both EC public key objects and tuple representations.
+        
+        Returns:
+            Tuple of (x, y) coordinates
+        """
+        if isinstance(self.recipient_public_key, tuple):
+            return self.recipient_public_key
+        else:
+            # It's an EC public key object
+            pub_numbers = self.recipient_public_key.public_numbers()
+            return (pub_numbers.x, pub_numbers.y)
     
     def secure_send(self, mail: EmailMessage) -> SecureBundle:
         """
@@ -129,20 +148,23 @@ class ExchangeManager:
             
         Process:
             Step 1 (Sender): Convert message to bytes and sign
-            ├─ Convert EmailMessage to bytes
-            └─ Generate Schnorr signature using sender's private key
+                Convert EmailMessage to bytes
+                Generate Schnorr signature using sender's private key
             
             Step 2 (Niko): Encrypt message + signature with RC6-GCM
-            ├─ Generate random session key (32 bytes)
-            ├─ Generate random IV (12 bytes)
-            └─ RC6-GCM encrypts (message || signature) with session key
+                Generate random session key (32 bytes)
+                Generate random IV (12 bytes)
+                RC6-GCM encrypts (message || signature) with session key
             
             Step 3 (Roni): Create secure bundle
-            └─ Return SecureBundle with all encrypted components
+                Return SecureBundle with all encrypted components
         """
         # ===================== STEP 1: SIGN =====================
         # Convert message content to bytes
         mail_as_bytes = mail.to_bytes()
+        print(f"\n1. SCHNORR SIGNATURE")
+        print(f"\t Input: Message bytes ({len(mail_as_bytes)} bytes)")
+        print(f"\t Hex: {mail_as_bytes.hex()[:64]}...")
         
         # Generate Schnorr signature
         schnorr_signer = SchnorrSigner()     
@@ -154,11 +176,17 @@ class ExchangeManager:
         # Combine message and signature for encryption
         signature_bytes = signature.to_bytes()
         plaintext = mail_as_bytes + signature_bytes
+        print(f"\t Generated signature:\n\t\t r={signature.get_r().hex()[:32]}...\n\t\t s={signature.get_s().hex()[:32]}...")
+        print(f"\t Signature bytes: {len(signature_bytes)} bytes | {signature_bytes.hex()[:32]}...")
+        print(f"\t Output: plaintext (msg + sig) = {len(plaintext)} bytes | {plaintext.hex()[:32]}...")
         
         # ===================== STEP 2: ENCRYPT =====================
         # Generate ephemeral symmetric key and IV
         self.session_key = self.generate_session_key()
         self.iv = self.generate_iv()
+        print(f"\n2. RC6-GCM ENCRYPTION")
+        print(f"\tSession key: {len(self.session_key)} bytes | {self.session_key.hex()}")
+        print(f"\tIV: {len(self.iv)} bytes | {self.iv.hex()}")
         
         # Create RC6-GCM cipher and encrypt
         rc6_gcm = RC6GCM(key=self.session_key, iv=self.iv)
@@ -168,11 +196,35 @@ class ExchangeManager:
             plaintext=plaintext,
             aad=b''  # No additional authenticated data
         )
+        print(f"\tPlaintext: {len(plaintext)} bytes | {plaintext.hex()[:32]}...")
+        print(f"\tCiphertext: {len(ciphertext)} bytes | {ciphertext.hex()[:64]}...")
+        print(f"\tAuth Tag: {len(auth_tag)} bytes | {auth_tag.hex()}")
         
         # ===================== STEP 3: WRAP KEY =====================
-        # In the real pipeline, session_key would be wrapped with El-Gamal
-        # For now, store session key as encrypted_key (would be replaced with El-Gamal output)
-        encrypted_key = self.session_key
+        # Use El-Gamal to wrap the session key
+        print(f"\n3. EL-GAMAL KEY WRAPPING")
+        print(f"\tInput session key: {len(self.session_key)} bytes | {self.session_key.hex()[:32]}...")
+        
+        # Create El-Gamal instance from recipient's public key
+        # Handle both tuple and EC public key formats
+        if isinstance(self.recipient_public_key, tuple):
+            recipient_coords = self.recipient_public_key
+        else:
+            # It's an EC public key object
+            recipient_coords = self._get_recipient_coords()
+        
+        el_gamal = ElGamalEC.from_public_key(recipient_coords)
+        
+        # Encrypt session key using El-Gamal
+        C1, C2 = el_gamal.encrypt(self.session_key)
+        
+        # Serialize C1 point and concatenate with C2
+        C1_bytes = el_gamal.point_to_bytes(C1)
+        encrypted_key = C1_bytes + C2
+        
+        print(f"\tC1 (ephemeral pubkey): {len(C1_bytes)} bytes | {C1_bytes.hex()}")
+        print(f"\tC2 (encrypted key): {len(C2)} bytes | {C2.hex()}")
+        print(f"\tOutput encrypted key: {len(encrypted_key)} bytes | {encrypted_key.hex()[:32]}...")
         
         # ===================== RETURN BUNDLE =====================
         # Create secure bundle with all encrypted components
@@ -207,27 +259,59 @@ class ExchangeManager:
             
         Process:
             Step 3: Unwrap session key (placeholder)
-            ├─ Extract encrypted key from bundle
-            └─ Use session key for decryption
+                Extract encrypted key from bundle
+                Use session key for decryption
             
             Step 2: Decrypt message with RC6-GCM
-            ├─ Create RC6-GCM cipher with session key and IV
-            ├─ RC6-GCM decrypts ciphertext (verifies auth tag)
-            └─ Get (message || signature) plaintext
+                Create RC6-GCM cipher with session key and IV
+                RC6-GCM decrypts ciphertext (verifies auth tag)
+                Get (message || signature) plaintext
             
             Step 1: Verify signature
-            ├─ Split plaintext into message and signature
-            ├─ Verify Schnorr signature using sender's public key
-            └─ Return message content
+                Split plaintext into message and signature
+                Verify Schnorr signature using sender's public key
+                Return message content
         """
         # ===================== STEP 3: UNWRAP KEY =====================
-        # In real implementation, would use El-Gamal to unwrap
-        # For now, encrypted_key is the session key directly
-        self.session_key = bundle.encrypted_key
+        # Use El-Gamal to unwrap the session key
+        print(f"\n1. EL-GAMAL KEY UNWRAPPING")
+        print(f"\tInput encrypted key: {len(bundle.encrypted_key)} bytes | {bundle.encrypted_key.hex()[:32]}...")
+        
+        # Create El-Gamal instance with receiver's private key
+        # Important: The private key must be in El-Gamal's valid range [1, N)
+        # Since cryptography uses a different range, we normalize it
+        priv_value = receiver_private_key.private_numbers().private_value
+        
+        # Normalize to El-Gamal's curve order N
+        from src.algorithms.el_gamal.el_gamal_ec import N as ELGAMAL_N
+        normalized_priv = (priv_value % (ELGAMAL_N - 1)) + 1
+        
+        # Create El-Gamal with normalized private key
+        el_gamal = ElGamalEC(normalized_priv)
+        
+        # Deserialize C1 and C2 from encrypted_key
+        encrypted_key_bytes = bundle.encrypted_key
+        C1_bytes = encrypted_key_bytes[:33]  # Compressed point is 33 bytes
+        C2 = encrypted_key_bytes[33:]
+        
+        # Decompress C1
+        C1 = el_gamal.bytes_to_point(C1_bytes)
+        
+        # Decrypt session key using El-Gamal
+        self.session_key = el_gamal.decrypt(C1, C2)
+        
+        print(f"\tC1 (ephemeral pubkey): {len(C1_bytes)} bytes | {C1_bytes.hex()[:32]}...")
+        print(f"\tC2 (encrypted key): {len(C2)} bytes | {C2.hex()[:32]}...")
+        print(f"\tOutput session key: {len(self.session_key)} bytes | {self.session_key.hex()[:32]}...")
         
         # ===================== STEP 2: DECRYPT =====================
         # Create RC6-GCM cipher and decrypt
         rc6_gcm = RC6GCM(key=self.session_key, iv=bundle.iv)
+        print(f"\n2. RC6-GCM DECRYPTION")
+        print(f"\tSession key: {len(self.session_key)} bytes | {self.session_key.hex()}")
+        print(f"\tIV: {len(bundle.iv)} bytes | {bundle.iv.hex()}")
+        print(f"\tCiphertext: {len(bundle.ciphertext)} bytes | {bundle.ciphertext.hex()[:64]}...")
+        print(f"\tAuth tag: {len(bundle.auth_tag)} bytes | {bundle.auth_tag.hex()}")
         
         try:
             plaintext = rc6_gcm.decrypt(
@@ -235,6 +319,7 @@ class ExchangeManager:
                 auth_tag=bundle.auth_tag,
                 aad=b''
             )
+            print(f"\tDecrypted plaintext: {len(plaintext)} bytes Auth verified")
         except ValueError as e:
             raise ValueError(f"Decryption failed - message may be tampered: {e}")
         
@@ -243,6 +328,9 @@ class ExchangeManager:
         # Signature is last 64 bytes (r: 32 bytes, s: 32 bytes)
         message_bytes = plaintext[:-64]
         signature_bytes = plaintext[-64:]
+        print(f"\n3. SCHNORR SIGNATURE VERIFICATION")
+        print(f"\tMessage bytes: {len(message_bytes)} bytes | {message_bytes.hex()[:64]}...")
+        print(f"\tSignature bytes: {len(signature_bytes)} bytes | {signature_bytes.hex()[:32]}...")
         
         from src.utils.signature_object import SignatureObject
         
@@ -251,6 +339,8 @@ class ExchangeManager:
             r=signature_bytes[:32],
             s=signature_bytes[32:64]
         )
+        print(f"\tSignature r: {signature.get_r().hex()[:32]}...")
+        print(f"\tSignature s: {signature.get_s().hex()[:32]}...")
         
         # Verify signature using sender's public key
         schnorr_verifier = SchnorrSigner()
@@ -262,56 +352,11 @@ class ExchangeManager:
         
         if not is_valid:
             raise ValueError("Signature verification failed - message is not authentic")
+        print(f"\tSignature verification:VALID")
         
         # Return message as string
-        return message_bytes.decode('utf-8', errors='replace')
-
-
-def main():
-    """
-    Test ExchangeManager with complete pipeline.
-    
-    Demonstrates:
-    1. Sender encrypts message with receiver's public key
-    2. Receiver decrypts and verifies
-    """
-    from src.utils.key_pair import KeyPair
-    
-    print("Testing ExchangeManager complete pipeline...")
-    print("=" * 60)
-    
-    # Setup: Generate key pairs for sender and receiver
-    print("\n[Setup] Generating key pairs...")
-    sender_private, sender_public = KeyPair.generate()
-    receiver_private, receiver_public = KeyPair.generate()
-    print("✓ Key pairs generated")
-    
-    # Sender side
-    print("\n[Sender] Creating ExchangeManager...")
-    manager = ExchangeManager(sender_private, receiver_public)
-    print("✓ ExchangeManager created")
-    
-    # Create and encrypt message
-    print("\n[Sender] Encrypting message...")
-    message = EmailMessage("Hello! This is a secure message from Alice.")
-    bundle = manager.secure_send(message)
-    print("✓ Message encrypted successfully")
-    print(f"  - Ciphertext size: {len(bundle.ciphertext)} bytes")
-    print(f"  - Auth tag: {len(bundle.auth_tag)} bytes")
-    print(f"  - IV: {len(bundle.iv)} bytes")
-    
-    # Receiver side
-    print("\n[Receiver] Decrypting message...")
-    manager2 = ExchangeManager(receiver_private, sender_public)
-    decrypted_msg = manager2.secure_receive(bundle, receiver_private)
-    print("✓ Message decrypted and verified")
-    print(f"  - Message: {decrypted_msg}")
-    
-    assert decrypted_msg == message.to_bytes().decode('utf-8'), "Message mismatch!"
-    
-    print("\n" + "=" * 60)
-    print("✓ All tests passed! Pipeline working correctly.")
-
-
-if __name__ == "__main__":
-    main()
+        message_text = message_bytes.decode('utf-8', errors='replace')
+        print(f"\nDECRYPTION COMPLETE")
+        print(f"\tFinal message: {message_text}")
+        
+        return message_text

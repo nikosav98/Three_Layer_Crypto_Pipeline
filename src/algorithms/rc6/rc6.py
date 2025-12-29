@@ -24,27 +24,6 @@ def rotl32(x, s):
     x = x & const.WORD_MASK
     return (x << s) | (x >> (32 - s))  & const.WORD_MASK
 
-def main():
-    # --- Test suit --- #
-    print("RC6 module test suit")
-    # 1.
-    print("test u32:")
-    print(u32(0x123456789))
-    print("\n")
-    # 2.
-    print("test rotl32:")
-    print(u32(rotl32(0x12345678, 4)))  # Example usage
-    print("\n")
-
-    # 3.
-    print("pack and unpack")
-    print("x = pack_block_little_endian(0x12345678, 0x9ABCDEF0, 0x13579BDF, 0x2468ACE0)")
-    x = pack_block_little_endian(0x12345678, 0x9ABCDEF0, 0x13579BDF, 0x2468ACE0)  # Example usage
-    print("unpacked:", unpack_block_little_endian(x))
-    print("\n")
-
-    # --- End of Test suit --- #
-
 # Unpack a 16 byte block into four little endian 32 bit words
 # Returns a tuple of four integers
 def unpack_block_little_endian(block16: bytes) -> tuple[int,int,int,int]:
@@ -168,6 +147,3 @@ def decrypt_block(block16: bytes, S: list[int], rounds: int = const.ROUNDS_DEFAU
 
     #return packed block
     return pack_block_little_endian(A, B, C, D)
-
-if __name__ == "__main__":
-    main()
