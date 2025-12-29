@@ -20,52 +20,7 @@ This project implements a complete three-layer encryption pipeline for secure me
 
 ### Three-Layer Encryption Pipeline
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    PLAINTEXT MESSAGE                         │
-└───────────────────┬─────────────────────────────────────────┘
-                    │
-        ┌───────────┴───────────┐
-        │                       │
-        ▼                       ▼
-    ┌─────────┐          ┌──────────┐
-    │ SIGNING │◄────────│ SCHNORR  │
-    │(Private)│         │Signature │
-    └────┬────┘         └──────────┘
-         │
-         │  [Message + Signature]
-         │
-    ┌────▼──────────┐
-    │   RC6-GCM     │  Generate ephemeral
-    │  ENCRYPTION   │  session key (32 bytes)
-    └────┬──────────┘
-         │
-         │  [Encrypted Message]
-         │
-    ┌────▼──────────────────┐
-    │  EL-GAMAL KEY WRAP    │  Wrap session key
-    │  (Asymmetric)         │  with recipient pubkey
-    └────┬───────────────────┘
-         │
-         ▼
-   ┌──────────────────┐
-   │  SECURE BUNDLE   │
-   │  ┌────────────┐  │
-   │  │ Encrypted  │  │  65 bytes
-   │  │  Session   │  │
-   │  │    Key     │  │
-   │  ├────────────┤  │
-   │  │   IV       │  │  12 bytes
-   │  ├────────────┤  │
-   │  │ Ciphertext │  │  Variable
-   │  ├────────────┤  │
-   │  │ Auth Tag   │  │  16 bytes
-   │  ├────────────┤  │
-   │  │Sender Pub  │  │  64 bytes
-   │  │    Key     │  │
-   │  └────────────┘  │
-   └──────────────────┘
-```
+![project_flow_chart](docs\project_flow_chart.png)
 
 ---
 
@@ -75,7 +30,7 @@ This project implements a complete three-layer encryption pipeline for secure me
 
 **Purpose**: Message Authentication and Non-Repudiation
 
-- **Curve**: SECP256K1 (Bitcoin's curve)
+- **Curve**: SECP256K1
 - **Hash Algorithm**: SHA-256
 - **Key Size**: 256 bits
 - **Signature Size**: 64 bytes (r: 32 bytes, s: 32 bytes)
@@ -93,9 +48,9 @@ This project implements a complete three-layer encryption pipeline for secure me
 3. Check if x-coordinate of result equals r
 
 **Security Properties**:
-- ✓ Non-malleable (can't modify valid signatures)
-- ✓ Deterministic (with deterministic nonce)
-- ✓ Provably secure under discrete log assumption
+-  Non-malleable (can't modify valid signatures)
+-  Deterministic (with deterministic nonce)
+-  Provably secure under discrete log assumption
 
 ### 2. RC6 in GCM Mode
 
@@ -104,9 +59,9 @@ This project implements a complete three-layer encryption pipeline for secure me
 **RC6 Specification**:
 - **Block Size**: 128 bits (16 bytes)
 - **Key Sizes**: 128, 192, or 256 bits
-- **Rounds**: 20 (configurable)
+- **Rounds**: 20
 - **Word Size**: 32 bits
-- **Rotation Amounts**: Data-dependent (improves security)
+- **Rotation Amounts**: Data-dependent
 
 **GCM Features**:
 - **Counter Mode (CTR)**: Streaming encryption
@@ -122,10 +77,10 @@ This project implements a complete three-layer encryption pipeline for secure me
 5. XOR tag with E(K, counter_0) for final authentication
 
 **Security Properties**:
-- ✓ NIST-approved mode
-- ✓ Authenticated encryption (AEAD)
-- ✓ Constant-time comparison for tag verification
-- ✓ Prevents tampering detection
+- NIST-approved mode
+- Authenticated encryption (AEAD)
+- Constant-time comparison for tag verification
+- Prevents tampering detection
 
 ### 3. El-Gamal Elliptic Curve Encryption
 
@@ -150,9 +105,9 @@ This project implements a complete three-layer encryption pipeline for secure me
 3. Recover session key: session_key = C2 XOR derived_key
 
 **Security Properties**:
-- ✓ Forward secrecy (ephemeral keys)
-- ✓ Based on ECDH (hardness of discrete log problem)
-- ✓ 256-bit security level
+- Forward secrecy (ephemeral keys)
+- Based on ECDH (hardness of discrete log problem)
+- 256-bit security level
 
 ---
 
@@ -194,13 +149,6 @@ Cyber_Security_and_Cryptography_course/
 │   └── secure_server.py              # Multi-threaded server application
 │
 ├── test/                             # Test suite
-│   ├── test_complete_pipeline.py     # Integration tests
-│   ├── test_schnorr.py               # Schnorr tests
-│   ├── test_rc6.py                   # RC6 tests
-│   ├── test_elgamal.py               # El-Gamal tests
-│   ├── test_integration.py           # End-to-end tests
-│   └── test_network.py               # Network tests
-│
 ├── docs/                             # Documentation
 │   └── diagrams.drawio               # Architecture diagrams
 │
@@ -235,8 +183,8 @@ python test/test_complete_pipeline.py
 ### Dependencies
 
 ```
-cryptography>=41.0.0  # For SECP256K1 key generation and EC utilities
-pytest>=7.0.0        # For unit testing
+cryptography >= 41.0.0  # For SECP256K1 key generation and EC utilities
+pytest >= 7.0.0        # For unit testing
 ```
 
 ---
@@ -285,106 +233,6 @@ The client will:
 - Exchange public keys
 - Encrypt messages using the 3-layer pipeline
 - Send and receive encrypted messages interactively
-
-#### Example Workflow
-
-```
-[Server]                          [Client]
-   │                                │
-   ├─ Listen on :5000               │
-   │                                │
-   │◄───── Connection Request ─────┤
-   │                                │
-   ├─ Send Public Key ──────────────►
-   │                                │
-   │◄────── Public Key ──────────────┤
-   │                                │
-   │  [Keys Exchanged - Ready]      │
-   │                                │
-   │◄─ Encrypted Message ───────────┤
-   │   (Schnorr + RC6-GCM + El-Gamal)
-   │                                │
-   ├─ Decrypt & Verify              │
-   ├─ Display Message               │
-   │                                │
-   ├─ Send ACK ────────────────────►
-   │                                │
-   └─ Handle More Clients           └─ Close Connection
-```
-
-### 3. Programmatic Usage
-
-```python
-from src.utils.key_pair import KeyPair
-from src.utils.email_message import EmailMessage
-from src.algorithms.key_exchange.exchange_manager import ExchangeManager
-
-# Generate key pairs
-sender_priv, sender_pub = KeyPair.generate()
-recipient_priv, recipient_pub = KeyPair.generate()
-
-# Get recipient's public key as coordinates
-recipient_coords = KeyPair.get_coordinates(recipient_pub)
-
-# Create message
-message = EmailMessage("Secret message")
-
-# SENDER: Encrypt message
-sender_manager = ExchangeManager(sender_priv, recipient_coords)
-encrypted_bundle = sender_manager.secure_send(message)
-
-# RECIPIENT: Decrypt message
-recipient_coords_sender = KeyPair.get_coordinates(sender_pub)
-recipient_manager = ExchangeManager(recipient_priv, recipient_coords_sender)
-plaintext = recipient_manager.secure_receive(encrypted_bundle, recipient_priv)
-
-print(f"Decrypted: {plaintext}")
-```
-
----
-
-## Test Results
-
-### Algorithm Verification
-
-```
-======================================================================
-COMPLETE PIPELINE INTEGRATION TEST SUITE
-======================================================================
-
-[1/4] Testing Schnorr Digital Signature...
-✓ Schnorr signature generation and verification passed
-✓ Schnorr tamper detection passed
-
-[2/4] Testing RC6-GCM Encryption...
-✓ RC6-GCM encryption/decryption roundtrip passed
-✓ RC6-GCM authentication verification passed
-
-[3/4] Testing El-Gamal Key Encapsulation...
-✓ El-Gamal key generation passed
-✓ El-Gamal key encapsulation passed
-
-[4/4] Testing Complete Pipeline...
-✓ Message encrypted successfully
-✓ Message decrypted successfully
-✓ Tamper detection passed
-
-======================================================================
-ALL TESTS PASSED! ✓
-======================================================================
-```
-
-### Algorithm Correctness
-
-| Algorithm | Status | Notes |
-|-----------|--------|-------|
-| **Schnorr Signature** | ✓ Verified | SECP256K1, SHA-256, non-malleable |
-| **RC6-GCM** | ✓ Verified | 256-bit key, GCM authenticated encryption |
-| **El-Gamal EC** | ✓ Verified | SECP256K1, ECDH-based key wrapping |
-| **3-Layer Pipeline** | ✓ Verified | Complete encryption/decryption roundtrip |
-| **Message Authentication** | ✓ Verified | Tamper detection working |
-
----
 
 ## Security Considerations
 
@@ -465,121 +313,7 @@ Security Level: 256 bits
 
 ---
 
-## Troubleshooting
-
-### Common Issues
-
-**Issue**: `ModuleNotFoundError: No module named 'cryptography'`
-```bash
-pip install cryptography
-```
-
-**Issue**: Port 5000 already in use
-```bash
-# Find process using port 5000
-lsof -i :5000
-
-# Run server on different port
-python src/secure_server.py -p 5001
-```
-
-**Issue**: El-Gamal key compatibility warning
-- This is expected when using cryptography EC keys with El-Gamal
-- El-Gamal uses a custom curve order; normalization is automatic
-- The pipeline is still cryptographically sound
-
-### Debugging
-
-Enable verbose output:
-```bash
-# Run tests with output
-pytest test/ -s -v
-
-# Run client with debug output
-python src/secure_client.py --debug
-```
-
----
-
-## Contributing
-
-To extend this project:
-
-1. **Add New Algorithms**
-   - Implement in `src/algorithms/<algorithm>/`
-   - Add tests in `test/test_<algorithm>.py`
-   - Document in this README
-
-2. **Improve Performance**
-   - Profile hot paths
-   - Consider native implementations for CPU-intensive operations
-   - See `performance/` directory for benchmarks
-
-3. **Enhance Security**
-   - Add key derivation functions (HKDF)
-   - Implement forward secrecy mechanisms
-   - Add support for authenticated key exchange (X25519+Kyber)
-
----
-
-## References
-
-### Academic Papers
-
-1. Schnorr, C. P. (1991). "Efficient Identification and Signatures for Smart Cards"
-2. Rivest, R. L., et al. (1998). "The RC6 Block Cipher"
-3. McGrew, D., Viega, J. (2005). "The Galois/Counter Mode of Operation (GCM)"
-4. Koblitz, N., Menezes, A. (2005). "Elliptic Curve Cryptography: The Serpentine Course of a Paradigm Shift"
-
-### Standards & Specifications
-
-- [SECP256K1](https://en.bitcoin.it/wiki/Secp256k1) - Bitcoin curve specification
-- [NIST SP 800-38D](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf) - GCM Mode Specification
-- [RFC 3394](https://tools.ietf.org/html/rfc3394) - AES Key Wrap Algorithm
-- [Cryptography.io](https://cryptography.io/) - Python cryptography library
-
-### Tools
-
-- **Cryptography Library**: https://cryptography.io/
-- **SECP256K1 Reference**: https://github.com/bitcoin-core/secp256k1
-- **Python Docs**: https://docs.python.org/3/
-
----
-
-## License
-
-This project is part of the **Cyber Security and Cryptography Course** at Ort Braude College of Engineering.
-
-Educational use only. Not recommended for production security-critical systems without additional security audits.
-
----
-
-## Contact & Support
-
-**Author**: Yuval Kogan  
-**Institution**: Ort Braude College of Engineering  
-**Course**: Cyber Security and Cryptography  
-
-For questions or issues:
-- GitHub Issues: [Open an issue](https://github.com/KoganTheDev/Cyber_Security_and_Cryptography_course/issues)
-- Pull Requests: [Submit a PR](https://github.com/KoganTheDev/Cyber_Security_and_Cryptography_course/pulls)
-
----
-
-## Glossary
-
-| Term | Definition |
-|------|-----------|
-| **AEAD** | Authenticated Encryption with Associated Data |
-| **CTR** | Counter Mode - converts block cipher to stream cipher |
-| **ECDH** | Elliptic Curve Diffie-Hellman key exchange |
-| **GCM** | Galois/Counter Mode - authenticated encryption mode |
-| **KDF** | Key Derivation Function |
-| **MAC** | Message Authentication Code |
-| **SECP256K1** | Standards for Efficient Cryptography 256-bit curve |
-
----
-
-**Last Updated**: December 29, 2025  
-**Version**: 1.0.0  
-**Status**: Production-Ready ✓
+**Authors**:
+* Yuval Kogan  
+* Nokolay Savchenko
+* Roni Shifrin
