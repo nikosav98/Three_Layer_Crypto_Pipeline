@@ -81,7 +81,7 @@ def get_ip_from_input(prompt: str = "Enter server IP address", default: str = "1
         Validated IP address string
     """
     while True:
-        user_input = input(f"{prompt} [{default}]: ").strip()
+        user_input = input(f"{prompt} [default = {default}]: ").strip()
         
         # Use default if empty input
         if not user_input:
@@ -91,8 +91,8 @@ def get_ip_from_input(prompt: str = "Enter server IP address", default: str = "1
         if validate_ip_address(user_input):
             return user_input
         else:
-            print(f"  ❌ Invalid IP address: '{user_input}'")
-            print(f"  ℹ️  Please enter a valid IPv4 address (e.g., 127.0.0.1)")
+            print(f"Invalid IP address: '{user_input}'")
+            print(f"Please enter a valid IPv4 address (e.g., 127.0.0.1)")
 
 
 def get_port_from_input(prompt: str = "Enter port number", default: int = 5000) -> int:
@@ -107,7 +107,7 @@ def get_port_from_input(prompt: str = "Enter port number", default: int = 5000) 
         Validated port number as integer
     """
     while True:
-        user_input = input(f"{prompt} [{default}]: ").strip()
+        user_input = input(f"{prompt} [default = {default}]: ").strip()
         
         # Use default if empty input
         if not user_input:
@@ -117,8 +117,8 @@ def get_port_from_input(prompt: str = "Enter port number", default: int = 5000) 
         if validate_port(user_input):
             return int(user_input)
         else:
-            print(f"  ❌ Invalid port number: '{user_input}'")
-            print(f"  ℹ️  Please enter a port number between 1 and 65535")
+            print(f"Invalid port number: '{user_input}'")
+            print(f"Please enter a port number between 1 and 65535")
 
 
 def get_network_config(server_mode: bool = False) -> Tuple[str, int]:
@@ -136,7 +136,7 @@ def get_network_config(server_mode: bool = False) -> Tuple[str, int]:
         print("SERVER CONFIGURATION")
         print("="*60)
         # For server, default to all interfaces
-        host = get_ip_from_input("Enter binding IP address", "0.0.0.0")
+        host = get_ip_from_input("Enter binding IP address", "127.0.0.1")
     else:
         print("\n" + "="*60)
         print("CLIENT CONFIGURATION")
@@ -146,7 +146,7 @@ def get_network_config(server_mode: bool = False) -> Tuple[str, int]:
     
     port = get_port_from_input("Enter port number", 5000)
     
-    print(f"  ✓ Configuration validated: {host}:{port}\n")
+    print(f"Configuration validated: {host}:{port}\n")
     
     return host, port
 

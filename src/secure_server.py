@@ -20,12 +20,6 @@ Protocol:
     5. DECRYPT and verify using ExchangeManager
     6. SEND ACK or ERROR response
     7. CLOSE connection or DISCONNECT
-
-Usage:
-    python src/secure_server.py
-    
-    Server starts on 0.0.0.0:5000 and waits for client connections.
-    Each client connection is handled in a separate thread.
     
 References:
     - Message Format: SecureBundle (encrypted_key, iv, ciphertext, auth_tag, sender_pub_key)
