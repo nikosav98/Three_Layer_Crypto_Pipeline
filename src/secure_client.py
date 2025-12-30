@@ -44,6 +44,7 @@ if project_root not in sys.path:
 from src.utils.key_pair import KeyPair
 from src.utils.email_message import EmailMessage
 from src.algorithms.key_exchange.exchange_manager import ExchangeManager
+from src.utils.input_validation import get_network_config, validate_ip_address, validate_port
 from cryptography.hazmat.primitives import serialization
 
 class SecureClient:
@@ -392,11 +393,25 @@ def main():
     Usage:
         python src/secure_client.py [server_host] [server_port]
     
-    Defaults to connecting to 0.0.0.0:5000 (server on localhost)
+    If not enough arguments provided, prompts user for validated input.
+    Defaults to connecting to 127.0.0.1:5000
     """
-    # Parse arguments
-    host = "0.0.0.0" if len(sys.argv) < 2 else sys.argv[1]
-    port = 5000 if len(sys.argv) < 3 else int(sys.argv[2])
+    # Check if sufficient arguments provided
+    if len(sys.argv) < 3:
+        # Get network config from user input with validation
+        host, port = get_network_config(server_mode=False)
+    else:
+        # Use command-line arguments
+        host = sys.argv[1]
+        port = int(sys.argv[2])
+        
+        # Validate provided arguments
+        if not validate_ip_address(host):
+            print(f"Invalid IP address: {host}")
+            sys.exit(1)
+        if not validate_port(str(port)):
+            print(f"Invalid port number: {port}")
+            sys.exit(1)
     
     # Create and run client
     client = SecureClient(host=host, port=port)

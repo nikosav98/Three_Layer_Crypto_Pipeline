@@ -51,6 +51,7 @@ if project_root not in sys.path:
 
 from src.utils.key_pair import KeyPair
 from src.algorithms.key_exchange.exchange_manager import ExchangeManager
+from src.utils.input_validation import get_network_config, validate_ip_address, validate_port
 
 
 class SecureServer:
@@ -537,14 +538,30 @@ def main():
     Usage:
         python src/secure_server.py [host] [port] [max_clients]
     
+    If not enough arguments provided, prompts user for validated input.
+    
     Defaults:
         - host: 0.0.0.0 (all interfaces)
         - port: 5000
         - max_clients: 10
     """
-    # Parse arguments
-    host = "0.0.0.0" if len(sys.argv) < 2 else sys.argv[1]
-    port = 5000 if len(sys.argv) < 3 else int(sys.argv[2])
+    # Check if sufficient arguments provided
+    if len(sys.argv) < 3:
+        # Get network config from user input with validation
+        host, port = get_network_config(server_mode=True)
+    else:
+        # Use command-line arguments
+        host = sys.argv[1]
+        port = int(sys.argv[2])
+        
+        # Validate provided arguments
+        if not validate_ip_address(host):
+            print(f"Invalid IP address: {host}")
+            sys.exit(1)
+        if not validate_port(str(port)):
+            print(f"Invalid port number: {port}")
+            sys.exit(1)
+    
     max_clients = 10 if len(sys.argv) < 4 else int(sys.argv[3])
     
     # Print header
