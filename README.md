@@ -1,4 +1,4 @@
-# Cyber Security and Cryptography Course
+# 🔐 Three Layer Crypto Pipeline
 
 **A comprehensive implementation of modern cryptographic algorithms and protocols**
 
