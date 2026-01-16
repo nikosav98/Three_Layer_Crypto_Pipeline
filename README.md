@@ -329,5 +329,5 @@ Security Level: 256 bits
 
 **Authors**:
 * Yuval Kogan  
-* Nokolay Savchenko
+* Nikolay Savchenko
 * Roni Shifrin
